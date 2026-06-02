@@ -1,30 +1,30 @@
 import os
 import asyncio
 import hashlib
+import streamlit as st  # Нужно, чтобы Streamlit не закрывал приложение
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart
 from yt_dlp import YoutubeDL
 
+# Считываем токен
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
-    raise ValueError("Ошибка: Переменная BOT_TOKEN не задана в настройках Space!")
+    raise ValueError("Ошибка: Переменная BOT_TOKEN не задана!")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-DOWNLOAD_DIR = "/tmp/downloads"
+DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# Настройки для поиска 5 треков БЕЗ скачивания
 SEARCH_OPTIONS = {
     'format': 'bestaudio/best',
     'noplaylist': True,
-    'default_search': 'scsearch5',  # Ищем ТОП-5 результатов в SoundCloud
+    'default_search': 'scsearch5',
     'quiet': True,
-    'extract_flat': True,           # Быстрое извлечение только метаданных (ссылка, название)
+    'extract_flat': True,           
 }
 
-# Настройки для скачивания конкретного трека по URL
 DOWNLOAD_OPTIONS = {
     'format': 'bestaudio/best',
     'noplaylist': True,
@@ -40,12 +40,11 @@ DOWNLOAD_OPTIONS = {
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
     await message.answer(
-        "🎵 **Привет! Я музыкальный бот.**\n\n"
-        "1. Отправь мне название трека прямо сюда, чтобы выбрать из списка.\n"
-        "2. Или используй меня в любом чате, написав: `@имя_вашего_бота название`"
+        "🎵 **Привет! Я твой музыкальный бот.**\n\n"
+        "• Отправь мне название трека прямо сюда, чтобы выбрать из списка.\n"
+        "• Или используй меня в любом чате (инлайн), написав: `@юзернейм_бота название`"
     )
 
-# --- 1. Обычный режим: Поиск списка песен через чат ---
 @dp.message()
 async def search_and_show_list(message: types.Message):
     query = message.text
@@ -58,7 +57,7 @@ async def search_and_show_list(message: types.Message):
             
         if 'entries' in info and len(info['entries']) > 0:
             keyboard = types.InlineKeyboardMarkup(inline_keyboard=[])
-            text = "🎶 **Вот что я нашёл. Выберите трек для скачивания:**\n\n"
+            text = "🎶 **Вот что я нашёл. Выберите трек:**\n\n"
             
             for idx, entry in enumerate(info['entries'][:5], 1):
                 title = entry.get('title', 'Без названия')
@@ -67,9 +66,7 @@ async def search_and_show_list(message: types.Message):
                 
                 text += f"{idx}. **{title}** — __{uploader}__\n"
                 
-                # Создаем хэш от URL, так как Telegram разрешает callback_data длиной до 64 байт
                 url_hash = hashlib.md5(url.encode()).hexdigest()
-                # Сохраняем связь хэш -> URL во временную память бота (очень простой кэш)
                 dp["url_cache_" + url_hash] = url
                 
                 keyboard.inline_keyboard.append([
@@ -78,26 +75,24 @@ async def search_and_show_list(message: types.Message):
                 
             await status_msg.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
         else:
-            await status_msg.edit_text("❌ Ничего не найдено по этому запросу.")
+            await status_msg.edit_text("❌ Ничего не найдено.")
     except Exception as e:
         await status_msg.edit_text("⚠️ Ошибка поиска треков.")
         print(f"Ошибка поиска: {e}")
 
-# Обработка нажатия на кнопку "Скачать" из списка
 @dp.callback_query(F.data.startswith("dl_"))
 async def download_selected_track(callback: types.CallbackQuery):
-    url_hash = callback.data.split("_")[1]
+    url_hash = callback.data.split("_")
     url = dp.get("url_cache_" + url_hash)
     
     if not url:
-        await callback.answer("❌ Ссылка устарела. Повторите поиск.", show_alert=True)
+        await callback.answer("❌ Ссылка устарела. Сделайте поиск заново.", show_alert=True)
         return
         
-    await callback.message.edit_text("📥 Начинаю скачивание файла, подождите...")
+    await callback.message.edit_text("📥 Скачиваю MP3, подождите...")
     
     try:
         loop = asyncio.get_event_loop()
-        # Скачиваем конкретный трек по прямой ссылке
         with YoutubeDL(DOWNLOAD_OPTIONS) as ydl:
             info = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=True))
             
@@ -105,18 +100,17 @@ async def download_selected_track(callback: types.CallbackQuery):
         file_path = f"{DOWNLOAD_DIR}/{title}.mp3"
         
         if os.path.exists(file_path):
-            await callback.message.edit_text("⚡ Файл готов! Отправляю...")
+            await callback.message.edit_text("⚡ Отправляю файл в Telegram...")
             audio_file = types.FSInputFile(file_path)
-            await callback.message.answer_audio(audio=audio_file, title=title, caption="Ваш трек готов! 🎧")
+            await callback.message.answer_audio(audio=audio_file, title=title, caption="Готово! 🎧")
             os.remove(file_path)
             await callback.message.delete()
         else:
-            await callback.message.edit_text("❌ Ошибка: файл не найден на сервере.")
+            await callback.message.edit_text("❌ Ошибка: файл потерялся.")
     except Exception as e:
-        await callback.message.edit_text("⚠️ Не удалось скачать этот трек.")
+        await callback.message.edit_text("⚠️ Не удалось скачать трек.")
         print(f"Ошибка скачивания: {e}")
 
-# --- 2. Инлайн-режим: Поиск прямо во время ввода в любом чате ---
 @dp.inline_query()
 async def inline_search(inline_query: types.InlineQuery):
     query = inline_query.query.strip()
@@ -135,18 +129,16 @@ async def inline_search(inline_query: types.InlineQuery):
                 url = entry.get('url')
                 uploader = entry.get('uploader', 'SoundCloud')
                 
-                # В инлайн-режиме без своего сервера баз данных проще всего сразу присылать 
-                # ссылку на SoundCloud, встроенный плеер Telegram сам её красиво оформит.
                 input_message_content = types.InputTextMessageContent(
-                    message_text=f"🎵 **Слушаю трек:** [{title}]({url}) через SoundCloud.",
+                    message_text=f"🎵 **Трек из SoundCloud:** [{title}]({url})",
                     parse_mode="Markdown"
                 )
                 
                 results.append(
                     types.InlineQueryResultArticle(
-                        id=f"music_{idx}_{hashlib.md5(url.encode()).hexdigest()}",
+                        id=f"inline_{idx}_{hashlib.md5(url.encode()).hexdigest()}",
                         title=title,
-                        description=f"Исполнитель: {uploader}",
+                        description=f"Автор: {uploader}",
                         input_message_content=input_message_content
                     )
                 )
@@ -155,7 +147,11 @@ async def inline_search(inline_query: types.InlineQuery):
     except Exception as e:
         print(f"Ошибка инлайн-поиска: {e}")
 
-async main():
+async def main():
+    # Простая заглушка для интерфейса Streamlit, чтобы сервер не засыпал
+    st.title("🎵 Мой Музыкальный Бот запущен!")
+    st.write("Бот успешно работает в Telegram 24/7.")
+    
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
