@@ -152,7 +152,12 @@ async def main():
     st.title("🎵 Мой Музыкальный Бот запущен!")
     st.write("Бот успешно работает в Telegram 24/7.")
     
+    # СНОСИМ ВСЕ ВЕБХУКИ И СТАРЫЙ СПАМ НА КОРНЮ
+    await bot.delete_webhook(drop_pending_updates=True)
+    
+    # Запуск опроса
     await dp.start_polling(bot, handle_signals=False)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
