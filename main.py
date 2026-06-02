@@ -152,7 +152,7 @@ async def main():
     st.title("🎵 Мой Музыкальный Бот запущен!")
     st.write("Бот успешно работает в Telegram 24/7.")
     
-    await dp.start_polling(bot)
+    await dp.start_polling(bot, handle_signals=False)
 
 if __name__ == "__main__":
     asyncio.run(main())
