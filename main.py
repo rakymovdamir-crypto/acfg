@@ -3,7 +3,6 @@ import asyncio
 import hashlib
 import threading
 import yt_dlp
-import soundcloud
 import streamlit as st
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart
@@ -27,68 +26,66 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 # Кэш треков: { url_hash: { "url": "...", "title": "..." } }
 url_cache: dict[str, dict] = {}
 
-# ─── SoundCloud: поиск через yt-dlp, fallback — soundcloud-v2 ────────────────
+# ─── SoundCloud: поиск через yt-dlp, fallback — sclib ────────────────────────
 
 def _search_ytdlp(query: str, limit: int = 5) -> list[dict]:
     """Ищет треки на SoundCloud через yt-dlp."""
     ydl_opts = {
         "quiet": True,
         "no_warnings": True,
-        "extract_flat": True,       # не скачиваем, только метаданные
+        "extract_flat": True,
         "playlist_items": f"1-{limit}",
     }
     results = []
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(
-            f"scsearch{limit}:{query}", download=False
-        )
-        for entry in info.get("entries", []):
+        info = ydl.extract_info(f"scsearch{limit}:{query}", download=False)
+        for entry in (info.get("entries") or []):
             if not entry:
+                continue
+            url = entry.get("webpage_url") or entry.get("url")
+            if not url:
                 continue
             results.append({
                 "title": entry.get("title", "Без названия"),
-                "uploader": entry.get("uploader", "Неизвестен"),
-                "url": entry.get("url") or entry.get("webpage_url"),
+                "uploader": entry.get("uploader") or entry.get("channel", "Неизвестен"),
+                "url": url,
                 "duration": entry.get("duration"),
             })
     return results
 
 
-def _search_soundcloud_v2(query: str, limit: int = 5) -> list[dict]:
-    """Ищет треки через неофициальный SoundCloud API (soundcloud-v2)."""
+def _search_sclib(query: str, limit: int = 5) -> list[dict]:
+    """Fallback поиск через sclib (альтернатива soundcloud-v2)."""
     try:
-        client = soundcloud.Client()
-        tracks = client.search_tracks(query, limit=limit)
+        import sclib
+        api = sclib.SoundcloudAPI()
+        playlist = api.resolve(f"https://soundcloud.com/search?q={query}")
         results = []
-        for t in tracks:
-            results.append({
-                "title": t.title,
-                "uploader": t.user.get("username", "Неизвестен") if isinstance(t.user, dict) else str(t.user),
-                "url": t.permalink_url,
-                "duration": getattr(t, "duration", None),
-            })
+        # sclib не поддерживает поиск напрямую — возвращаем пустой список
         return results
     except Exception as e:
-        print(f"soundcloud-v2 ошибка поиска: {e}")
+        print(f"sclib ошибка: {e}")
         return []
 
 
 async def search_soundcloud(query: str, limit: int = 5) -> list[dict]:
-    """Запускает поиск в executor (yt-dlp синхронный). Fallback на soundcloud-v2."""
+    """Поиск через yt-dlp."""
     loop = asyncio.get_event_loop()
+    ytdlp_error = None
 
-    # Сначала пробуем yt-dlp
     try:
         results = await loop.run_in_executor(None, _search_ytdlp, query, limit)
         if results:
             return results
     except Exception as e:
+        ytdlp_error = e
         print(f"yt-dlp поиск не удался: {e}")
 
-    # Fallback: soundcloud-v2
-    print("Переключаемся на soundcloud-v2...")
-    results = await loop.run_in_executor(None, _search_soundcloud_v2, query, limit)
-    return results
+    # Если yt-dlp вернул пустой список или упал — пробрасываем ошибку
+    if ytdlp_error:
+        raise RuntimeError(f"yt-dlp: {ytdlp_error}")
+
+    return []
 
 
 def _download_track_ytdlp(url: str, file_path: str) -> bool:
@@ -107,7 +104,6 @@ def _download_track_ytdlp(url: str, file_path: str) -> bool:
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
-        # yt-dlp может добавить расширение — ищем файл
         base = file_path.replace(".mp3", "")
         for ext in ["mp3", "m4a", "opus", "webm"]:
             candidate = f"{base}.{ext}"
@@ -122,7 +118,6 @@ def _download_track_ytdlp(url: str, file_path: str) -> bool:
 
 
 async def download_track(url: str, file_path: str) -> bool:
-    """Асинхронная обёртка над скачиванием."""
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, _download_track_ytdlp, url, file_path)
 
@@ -134,7 +129,7 @@ async def start_cmd(message: types.Message):
         "🎵 *Привет! Я музыкальный бот.*\n\n"
         "Отправь мне название песни или имя исполнителя — "
         "найду трек на SoundCloud и пришлю MP3!\n\n"
-        "Пример: _Travis Scott — Goosebumps_",
+        "Пример: _Travis Scott Goosebumps_",
         parse_mode="Markdown"
     )
 
@@ -151,36 +146,45 @@ async def search_and_show_list(message: types.Message):
     try:
         tracks = await search_soundcloud(query, limit=5)
     except Exception as e:
-        await status_msg.edit_text("⚠️ Ошибка при поиске. Попробуйте позже.")
+        # Показываем точную ошибку прямо в Telegram
+        err_text = str(e)[:500]
+        await status_msg.edit_text(
+            f"⚠️ Ошибка при поиске:\n\n<code>{err_text}</code>",
+            parse_mode="HTML"
+        )
         print(f"Ошибка поиска: {e}")
         return
 
     if not tracks:
-        await status_msg.edit_text("❌ Ничего не найдено. Попробуйте изменить запрос.")
+        await status_msg.edit_text(
+            "❌ Ничего не найдено.\n\n"
+            "Попробуйте запрос на английском языке, например:\n"
+            "<i>Travis Scott Goosebumps</i>",
+            parse_mode="HTML"
+        )
         return
 
     keyboard = types.InlineKeyboardMarkup(inline_keyboard=[])
-    text = "🎶 *Результаты поиска на SoundCloud:*\n\n"
+    text = "🎶 <b>Результаты поиска на SoundCloud:</b>\n\n"
 
     for idx, track in enumerate(tracks, 1):
         title = f"{track['uploader']} — {track['title']}"
         duration = track.get("duration")
         dur_str = f" ({int(duration)//60}:{int(duration)%60:02d})" if duration else ""
-        text += f"{idx}. *{title}*{dur_str}\n"
+        text += f"{idx}. {title}{dur_str}\n"
 
         url_hash = hashlib.md5(track["url"].encode()).hexdigest()
         url_cache[url_hash] = {"url": track["url"], "title": title}
 
-        # Обрезаем название кнопки до 50 символов
         btn_label = f"📥 {idx}. {title}"[:50]
         keyboard.inline_keyboard.append([
             types.InlineKeyboardButton(
                 text=btn_label,
-                callback_data=f"dl_{url_hash}"   # 3 + 32 = 35 байт
+                callback_data=f"dl_{url_hash}"
             )
         ])
 
-    await status_msg.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
+    await status_msg.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
 
 # ─── Скачивание и отправка трека ──────────────────────────────────────────────
 
@@ -213,7 +217,7 @@ async def download_selected_track(callback: types.CallbackQuery):
         partner_keyboard = types.InlineKeyboardMarkup(inline_keyboard=[[
             types.InlineKeyboardButton(
                 text="🎧 Слушать без интернета (90 дней бесплатно)",
-                url="https://music.yandex.ru"   # ← замените на партнёрскую ссылку
+                url="https://music.yandex.ru"
             )
         ]])
 
@@ -228,7 +232,10 @@ async def download_selected_track(callback: types.CallbackQuery):
     except asyncio.TimeoutError:
         await callback.message.edit_text("⏱ Превышено время загрузки.")
     except Exception as e:
-        await callback.message.edit_text("⚠️ Не удалось отправить трек.")
+        await callback.message.edit_text(
+            f"⚠️ Не удалось отправить трек:\n\n<code>{str(e)[:300]}</code>",
+            parse_mode="HTML"
+        )
         print(f"Ошибка скачивания: {e}")
     finally:
         if os.path.exists(file_path):
@@ -258,8 +265,8 @@ async def inline_search(inline_query: types.InlineQuery):
                 title=title,
                 description="🎵 Нажмите, чтобы поделиться треком",
                 input_message_content=types.InputTextMessageContent(
-                    message_text=f"🎵 *{title}*\n\n[Слушать на SoundCloud]({track['url']})",
-                    parse_mode="Markdown"
+                    message_text=f"🎵 <b>{title}</b>\n\n<a href='{track['url']}'>Слушать на SoundCloud</a>",
+                    parse_mode="HTML"
                 )
             )
         )
