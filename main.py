@@ -49,8 +49,6 @@ def ensure_tor_running():
         print(f"❌ Ошибка запуска Tor: {e}")
         return False
 
-# Прокси настройки для yt-dlp через Tor
-TOR_PROXY = "socks5://127.0.0.1:9050"
 
 # ─── Глобальный флаг — защита от двойного запуска ────────────────────────────
 _BOT_STARTED = False
@@ -72,14 +70,32 @@ url_cache: dict[str, dict] = {}
 
 # ─── SoundCloud: поиск через yt-dlp, fallback — sclib ────────────────────────
 
+# Общие yt-dlp опции — без Tor (SoundCloud блокирует Tor-ноды)
+YDL_BASE_OPTS = {
+    "quiet": True,
+    "no_warnings": True,
+    # Реалистичный браузерный User-Agent
+    "http_headers": {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://soundcloud.com/",
+    },
+    # Немного случайной задержки — меньше шансов получить бан
+    "sleep_interval": 1,
+    "max_sleep_interval": 3,
+}
+
+
 def _search_ytdlp(query: str, limit: int = 5) -> list[dict]:
     """Ищет треки на SoundCloud через yt-dlp."""
     ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
+        **YDL_BASE_OPTS,
         "extract_flat": True,
         "playlist_items": f"1-{limit}",
-        "proxy": TOR_PROXY,
     }
     results = []
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -97,20 +113,6 @@ def _search_ytdlp(query: str, limit: int = 5) -> list[dict]:
                 "duration": entry.get("duration"),
             })
     return results
-
-
-def _search_sclib(query: str, limit: int = 5) -> list[dict]:
-    """Fallback поиск через sclib (альтернатива soundcloud-v2)."""
-    try:
-        import sclib
-        api = sclib.SoundcloudAPI()
-        playlist = api.resolve(f"https://soundcloud.com/search?q={query}")
-        results = []
-        # sclib не поддерживает поиск напрямую — возвращаем пустой список
-        return results
-    except Exception as e:
-        print(f"sclib ошибка: {e}")
-        return []
 
 
 async def search_soundcloud(query: str, limit: int = 5) -> list[dict]:
@@ -136,11 +138,9 @@ async def search_soundcloud(query: str, limit: int = 5) -> list[dict]:
 def _download_track_ytdlp(url: str, file_path: str) -> bool:
     """Скачивает трек через yt-dlp в MP3."""
     ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
+        **YDL_BASE_OPTS,
         "format": "bestaudio/best",
         "outtmpl": file_path.replace(".mp3", ".%(ext)s"),
-        "proxy": TOR_PROXY,
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
             "preferredcodec": "mp3",
@@ -328,16 +328,6 @@ def ensure_bot_running():
 
 st.title("🎵 SoundCloud Музыкальный Бот")
 st.write("Бот работает в Telegram 24/7 и ищет треки на SoundCloud.")
-
-# Запускаем Tor один раз
-if "tor_started" not in st.session_state:
-    st.session_state["tor_started"] = True
-    with st.spinner("🧅 Запускаю Tor..."):
-        tor_ok = ensure_tor_running()
-    if tor_ok:
-        st.success("🧅 Tor подключён — геоблокировка обойдена!")
-    else:
-        st.warning("⚠️ Tor не запустился, бот работает без него.")
 
 just_started = ensure_bot_running()
 st.success("✅ Бот запущен!" if just_started else "✅ Бот уже работает.")
