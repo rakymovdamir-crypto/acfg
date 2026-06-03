@@ -1,12 +1,56 @@
 import os
+import time
 import asyncio
 import hashlib
 import threading
+import subprocess
 import yt_dlp
 import streamlit as st
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart
 from aiogram.exceptions import TelegramConflictError
+
+# ─── Запуск Tor ──────────────────────────────────────────────────────────────
+
+def ensure_tor_running():
+    """Запускает Tor если ещё не запущен. Возвращает True если успешно."""
+    try:
+        # Проверяем, запущен ли уже Tor
+        result = subprocess.run(["pgrep", "-x", "tor"], capture_output=True)
+        if result.returncode == 0:
+            return True  # уже работает
+
+        # Запускаем Tor в фоне
+        subprocess.Popen(
+            ["tor", "--SocksPort", "9050", "--quiet"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        # Ждём пока Tor поднимется (обычно 5-15 сек)
+        for _ in range(30):
+            time.sleep(1)
+            try:
+                r = subprocess.run(
+                    ["curl", "--socks5", "127.0.0.1:9050", "--max-time", "3",
+                     "-s", "https://check.torproject.org/api/ip"],
+                    capture_output=True, timeout=5
+                )
+                if b"IsTor" in r.stdout:
+                    print("✅ Tor запущен успешно")
+                    return True
+            except Exception:
+                pass
+        print("⚠️ Tor не поднялся за 30 секунд")
+        return False
+    except FileNotFoundError:
+        print("❌ Tor не установлен (нет в packages.txt?)")
+        return False
+    except Exception as e:
+        print(f"❌ Ошибка запуска Tor: {e}")
+        return False
+
+# Прокси настройки для yt-dlp через Tor
+TOR_PROXY = "socks5://127.0.0.1:9050"
 
 # ─── Глобальный флаг — защита от двойного запуска ────────────────────────────
 _BOT_STARTED = False
@@ -35,6 +79,7 @@ def _search_ytdlp(query: str, limit: int = 5) -> list[dict]:
         "no_warnings": True,
         "extract_flat": True,
         "playlist_items": f"1-{limit}",
+        "proxy": TOR_PROXY,
     }
     results = []
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -95,6 +140,7 @@ def _download_track_ytdlp(url: str, file_path: str) -> bool:
         "no_warnings": True,
         "format": "bestaudio/best",
         "outtmpl": file_path.replace(".mp3", ".%(ext)s"),
+        "proxy": TOR_PROXY,
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
             "preferredcodec": "mp3",
@@ -282,6 +328,16 @@ def ensure_bot_running():
 
 st.title("🎵 SoundCloud Музыкальный Бот")
 st.write("Бот работает в Telegram 24/7 и ищет треки на SoundCloud.")
+
+# Запускаем Tor один раз
+if "tor_started" not in st.session_state:
+    st.session_state["tor_started"] = True
+    with st.spinner("🧅 Запускаю Tor..."):
+        tor_ok = ensure_tor_running()
+    if tor_ok:
+        st.success("🧅 Tor подключён — геоблокировка обойдена!")
+    else:
+        st.warning("⚠️ Tor не запустился, бот работает без него.")
 
 just_started = ensure_bot_running()
 st.success("✅ Бот запущен!" if just_started else "✅ Бот уже работает.")
