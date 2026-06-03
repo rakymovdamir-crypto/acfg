@@ -17,14 +17,26 @@ dp = Dispatcher()
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
+# Настройки поиска (ТОП-5 результатов строго из SoundCloud с обходом блокировок)
 SEARCH_OPTIONS = {
     'format': 'bestaudio/best',
     'noplaylist': True,
-    'default_search': 'scsearch5',
+    'default_search': 'scsearch5',  # Ищем ТОП-5 в SoundCloud
     'quiet': True,
-    'extract_flat': True,           
+    'extract_flat': True,
+    # Передаем публичный ключ авторизации SoundCloud и маскируемся под браузер
+    'http_headers': {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+    },
+    # Специфичные настройки для SoundCloud, чтобы обойти бан IP хостинга
+    'extra_query_params': {
+        'client_id': 'iZIs9mchVcX52Xfz9S4v3ZftjndvCuOn' # Официальный публичный веб-ключ SoundCloud
+    }
 }
 
+# Настройки скачивания MP3 из SoundCloud
 DOWNLOAD_OPTIONS = {
     'format': 'bestaudio/best',
     'noplaylist': True,
@@ -35,6 +47,12 @@ DOWNLOAD_OPTIONS = {
         'preferredcodec': 'mp3',
         'preferredquality': '192',
     }],
+    'http_headers': {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    },
+    'extra_query_params': {
+        'client_id': 'iZIs9mchVcX52Xfz9S4v3ZftjndvCuOn'
+    }
 }
 
 @dp.message(CommandStart())
