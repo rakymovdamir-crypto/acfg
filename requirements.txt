@@ -1,3 +1,5 @@
-aiogram==3.13.1
-yt-dlp
-streamlit
+aiogram==3.7.0
+aiohttp==3.9.5
+yt-dlp==2024.8.6
+soundcloud-v2==1.3.1
+streamlit==1.36.0
