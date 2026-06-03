@@ -11,31 +11,27 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("Ошибка: Переменная BOT_TOKEN не задана в настройках Streamlit!")
 
-# Инициализируем бота и диспетчер стандартным образом
+# Инициализируем бота и диспетчер
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# Идеальные настройки поиска строго для SoundCloud с обходом блокировок
+# Идеальные настройки поиска по базе YouTube (ТОП-5 результатов)
 SEARCH_OPTIONS = {
     'format': 'bestaudio/best',
     'noplaylist': True,
-    'default_search': 'scsearch5',  # Ищем ТОП-5 в SoundCloud
+    'default_search': 'ytsearch5',  # Ищем ТОП-5 в YouTube
     'quiet': True,
     'extract_flat': True,
     'http_headers': {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
         'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-    },
-    'extra_query_params': {
-        'client_id': 'iZIs9mchVcX52Xfz9S4v3ZftjndvCuOn' # Публичный рабочий ключ SoundCloud
     }
 }
 
-# Настройки скачивания MP3 из SoundCloud
+# Настройки стабильного скачивания MP3 из YouTube
 DOWNLOAD_OPTIONS = {
     'format': 'bestaudio/best',
     'noplaylist': True,
@@ -48,9 +44,6 @@ DOWNLOAD_OPTIONS = {
     }],
     'http_headers': {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-    },
-    'extra_query_params': {
-        'client_id': 'iZIs9mchVcX52Xfz9S4v3ZftjndvCuOn'
     }
 }
 
@@ -66,7 +59,7 @@ async def start_cmd(message: types.Message):
 @dp.message()
 async def search_and_show_list(message: types.Message):
     query = message.text
-    status_msg = await message.answer("🔍 Ищу варианты в SoundCloud...")
+    status_msg = await message.answer("🔍 Ищу варианты...")
 
     try:
         loop = asyncio.get_event_loop()
@@ -80,9 +73,8 @@ async def search_and_show_list(message: types.Message):
             for idx, entry in enumerate(info['entries'][:5], 1):
                 title = entry.get('title', 'Без названия')
                 url = entry.get('url')
-                uploader = entry.get('uploader', 'SoundCloud')
                 
-                text += f"{idx}. **{title}** — __{uploader}__\n"
+                text += f"{idx}. **{title}**\n"
                 
                 # Хэшируем URL для умещения в лимиты callback_data (64 байта)
                 url_hash = hashlib.md5(url.encode()).hexdigest()
@@ -94,7 +86,7 @@ async def search_and_show_list(message: types.Message):
                 
             await status_msg.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
         else:
-            await status_msg.edit_text("❌ Ничего не найдено в SoundCloud. Уточните запрос.")
+            await status_msg.edit_text("❌ Ничего не найдено. Уточните запрос.")
     except Exception as e:
         await status_msg.edit_text("⚠️ Ошибка поиска треков.")
         print(f"Ошибка поиска: {e}")
@@ -123,12 +115,12 @@ async def download_selected_track(callback: types.CallbackQuery):
             await callback.message.edit_text("⚡ Отправляю файл в Telegram...")
             audio_file = types.FSInputFile(file_path)
             
-            # МОНЕТИЗАЦИЯ: Создаем ненавязчивую кнопку с пользой под треком
+            # МОНЕТИЗАЦИЯ: Партнерская кнопка под треком
             partner_keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
                 [
                     types.InlineKeyboardButton(
                         text="🎧 Слушать без интернета (90 дней бесплатно)", 
-                        url="https://ya.cc" # Вставьте сюда вашу реальную партнерскую ссылку
+                        url="https://ya.cc" # Вставьте сюда вашу реальную ссылку
                     )
                 ]
             ])
@@ -164,10 +156,9 @@ async def inline_search(inline_query: types.InlineQuery):
             for idx, entry in enumerate(info['entries'][:5]):
                 title = entry.get('title', 'Без названия')
                 url = entry.get('url')
-                uploader = entry.get('uploader', 'SoundCloud')
                 
                 input_message_content = types.InputTextMessageContent(
-                    message_text=f"🎵 **Трек из SoundCloud:** [{title}]({url})",
+                    message_text=f"🎵 **Найден трек:** [{title}]({url})",
                     parse_mode="Markdown"
                 )
                 
@@ -175,7 +166,6 @@ async def inline_search(inline_query: types.InlineQuery):
                     types.InlineQueryResultArticle(
                         id=f"inline_{idx}_{hashlib.md5(url.encode()).hexdigest()}",
                         title=title,
-                        description=f"Автор: {uploader}",
                         input_message_content=input_message_content
                     )
                 )
@@ -190,11 +180,11 @@ async def main():
     st.title("🎵 Мой Музыкальный Бот запущен!")
     st.write("Бот успешно работает в Telegram 24/7.")
     
-    # ПРИНУДИТЕЛЬНО очищаем старые зависшие вебхуки, убирая спам ошибок
+    # Очищаем старые зависшие вебхуки
     await bot.delete_webhook(drop_pending_updates=True)
     
     print("🚀 Бот успешно стартовал на Streamlit Cloud!")
-    # Запускаем опрос, запретив перехват системных сигналов в потоке
+    # Запускаем опрос
     await dp.start_polling(bot, handle_signals=False)
 
 if __name__ == "__main__":
