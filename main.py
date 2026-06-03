@@ -170,21 +170,21 @@ async def search_and_show_list(message: types.Message):
     for idx, track in enumerate(tracks, 1):
         title = f"{track['uploader']} — {track['title']}"
         duration = track.get("duration")
-        dur_str = f" ({int(duration)//60}:{int(duration)%60:02d})" if duration else ""
-        text += f"{idx}. {title}{dur_str}\n"
+        dur_str = f"{int(duration)//60}:{int(duration)%60:02d}" if duration else ""
+        # Каждый трек — кликабельная ссылка с длительностью как на фото
+        text += f"{dur_str} · <a href=\"{track['url']}\">{title}</a>\n"
 
         url_hash = hashlib.md5(track["url"].encode()).hexdigest()
         url_cache[url_hash] = {"url": track["url"], "title": title, "track_title": track["title"], "performer": track["uploader"]}
 
-        btn_label = f"📥 {idx}. {title}"[:50]
         keyboard.inline_keyboard.append([
             types.InlineKeyboardButton(
-                text=btn_label,
+                text=f"📥 Скачать: {title[:35]}",
                 callback_data=f"dl_{url_hash}"
             )
         ])
 
-    await status_msg.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    await status_msg.edit_text(text, reply_markup=keyboard, parse_mode="HTML", disable_web_page_preview=True)
 
 # ─── Скачивание и отправка трека ──────────────────────────────────────────────
 
@@ -247,37 +247,6 @@ async def download_selected_track(callback: types.CallbackQuery):
         if os.path.exists(file_path):
             os.remove(file_path)
 
-# ─── Инлайн-режим ─────────────────────────────────────────────────────────────
-
-@dp.inline_query()
-async def inline_search(inline_query: types.InlineQuery):
-    query = inline_query.query.strip()
-    if not query:
-        await inline_query.answer([], cache_time=1)
-        return
-
-    try:
-        tracks = await search_soundcloud(query, limit=5)
-    except Exception:
-        await inline_query.answer([], cache_time=1)
-        return
-
-    results = []
-    for idx, track in enumerate(tracks):
-        title = f"{track['uploader']} — {track['title']}"
-        results.append(
-            types.InlineQueryResultArticle(
-                id=f"inline_{idx}_{hashlib.md5(track['url'].encode()).hexdigest()}",
-                title=title,
-                description="🎵 Нажмите, чтобы поделиться треком",
-                input_message_content=types.InputTextMessageContent(
-                    message_text=f"🎵 <b>{title}</b>\n\n<a href='{track['url']}'>Слушать на SoundCloud</a>",
-                    parse_mode="HTML"
-                )
-            )
-        )
-
-    await inline_query.answer(results, cache_time=1)
 
 # ─── Запуск бота ──────────────────────────────────────────────────────────────
 
