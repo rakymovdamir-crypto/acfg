@@ -73,9 +73,11 @@ async def search_soundcloud(query: str, limit: int = 5) -> list[dict]:
 
 # ─── Скачивание треков ────────────────────────────────────────────────────────
 
-def _download_track_ytdlp(url: str, file_path: str) -> bool:
+def _download_track_ytdlp(url: str, file_path: str) -> tuple[bool, str]:
+    """Возвращает (успех, текст_ошибки)."""
     ydl_opts = {
         **YDL_BASE_OPTS,
+        "quiet": False,   # показываем все логи для диагностики
         "format": "bestaudio/best",
         "outtmpl": file_path.replace(".mp3", ".%(ext)s"),
         "postprocessors": [{
@@ -93,14 +95,14 @@ def _download_track_ytdlp(url: str, file_path: str) -> bool:
             if os.path.exists(candidate):
                 if candidate != file_path:
                     os.rename(candidate, file_path)
-                return True
-        return False
+                return True, ""
+        return False, "Файл не найден после скачивания"
     except Exception as e:
         print(f"Ошибка скачивания: {e}")
-        return False
+        return False, str(e)
 
 
-async def download_track(url: str, file_path: str) -> bool:
+async def download_track(url: str, file_path: str) -> tuple[bool, str]:
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, _download_track_ytdlp, url, file_path)
 
@@ -193,10 +195,15 @@ async def download_selected_track(callback: types.CallbackQuery):
     file_path = os.path.join(DOWNLOAD_DIR, f"{url_hash}.mp3")
 
     try:
-        success = await download_track(track_data["url"], file_path)
+        success, dl_error = await download_track(track_data["url"], file_path)
 
         if not success or not os.path.exists(file_path):
-            await callback.message.edit_text("❌ Не удалось скачать трек. Попробуйте другой.")
+            await callback.message.edit_text(
+                f"❌ Не удалось скачать трек.
+
+<code>{dl_error[:400]}</code>",
+                parse_mode="HTML"
+            )
             return
 
         await callback.message.edit_text("⚡ Отправляю файл в Telegram...")
