@@ -174,7 +174,7 @@ async def search_and_show_list(message: types.Message):
         text += f"{idx}. {title}{dur_str}\n"
 
         url_hash = hashlib.md5(track["url"].encode()).hexdigest()
-        url_cache[url_hash] = {"url": track["url"], "title": title}
+        url_cache[url_hash] = {"url": track["url"], "title": title, "track_title": track["title"], "performer": track["uploader"]}
 
         btn_label = f"📥 {idx}. {title}"[:50]
         keyboard.inline_keyboard.append([
@@ -200,6 +200,8 @@ async def download_selected_track(callback: types.CallbackQuery):
     await callback.message.edit_text("⏳ Скачиваю трек с SoundCloud...")
 
     title = track_data["title"]
+    track_title = track_data.get("track_title", title)
+    performer = track_data.get("performer", "")
     safe_title = "".join(c for c in title if c not in r'\/:*?"<>|')
     file_path = os.path.join(DOWNLOAD_DIR, f"{url_hash}.mp3")
 
@@ -221,9 +223,13 @@ async def download_selected_track(callback: types.CallbackQuery):
             )
         ]])
 
+        safe_track_title = "".join(c for c in track_title if c not in r'\/:*?"<>|')
+        safe_performer = "".join(c for c in performer if c not in r'\/:*?"<>|')
+
         await callback.message.answer_audio(
             audio=audio_file,
-            title=safe_title,
+            title=safe_track_title,
+            performer=safe_performer,
             caption="✅ Готово! Приятного прослушивания 🎧",
             reply_markup=partner_keyboard,
         )
